@@ -1,0 +1,462 @@
+---
+title: "SMP population assesment"
+output: html_notebook
+author: "Farshad Ebrahimi, Jan/30/2023"
+---
+
+The goal of this analysis is to assess the SMP population with CWL monitoring data, categorize them and find the underrepresented smp features in our data set. This is to ensure our monitoring effort results in a more comprehensive data set that covers all types of SMPs with varying design metrics such as loading ratios. The output of this analysis can assist the data collection team with their future site selection process.
+
+```{r section 1, Loading libraries and querying smp data }
+#Libraries
+      library(odbc)
+      library(DBI)
+      library(lubridate)
+      library(tidyverse)
+      library(stats)
+      library(gridExtra)
+      library(grid)
+      library(gtable)
+      library(ggtext)
+      library(dplyr)
+      library(ggplot2)
+      library(knitr)
+      library(plotly)
+      library(cluster)
+      library(factoextra)
+# DB PG14
+    con <- dbConnect(odbc::odbc(), dsn = "mars14_data", uid = Sys.getenv("shiny_uid"), pwd = Sys.getenv("shiny_pwd"), MaxLongVarcharSize = 8190)
+
+#Getting list of SMPs
+    cwl_smp <- dbGetQuery(con,"SELECT DISTINCT smp_id
+           FROM fieldwork.viw_deployment_full_cwl")
+    
+#Getting the greenit info
+    smpbdv <- dbGetQuery(con,"SELECT * FROM external.tbl_smpbdv")
+    sysbdv <- dbGetQuery(con,"SELECT * FROM external.tbl_systembdv")
+    greenit_unified <-dbGetQuery(con,"SELECT * FROM external.viw_greenit_unified")
+
+# join the greenit table with our smp list
+    smp_features <- cwl_smp %>% 
+      inner_join(smpbdv, by="smp_id")
+# Unmonitored SMPs
+    unmonitored_smp <- read.csv("C:\\Users\\Farshad.Ebrahimi\\OneDrive - City of Philadelphia\\Github Projects\\smp-population-assesment\\unmonitored_sites.csv") %>%
+      select(smp_id = SMP.ID) %>%
+      distinct()
+# unmonitored smp_features
+    unmonitored_smp_features <- unmonitored_smp %>%
+      inner_join(smpbdv, by="smp_id")
+```
+
+The following code chunk calculates the break-down of SMP types with CWL data.
+
+```{r section 2, Monitored SMP break-down based on type}
+#number of smp types
+smp_type_break <- smp_features %>% 
+  group_by(smp_smptype) %>%
+  summarise(count = n()) %>%
+  select(Type = smp_smptype, count)
+```
+
+```{r section 3 pie chart of monitored SMPs, echo=False}
+ggplot(smp_type_break, aes(x="", y= count, fill=Type))+geom_bar(width = 1, stat = "identity")+coord_polar("y", start=0)
+```
+
+```{r section 4, looking at the unmonitored SMPs to see the break-down}
+#number of unmonitored smps
+unmonitored_smp_type_break <- unmonitored_smp_features %>% 
+  group_by(smp_smptype) %>%
+  summarise(count = n()) %>%
+  select(Type = smp_smptype, count)
+```
+
+The following Pie chart shows the break-down of all SMPs (monitored and unmonitored).
+
+```{r setion 5 pie chart of unmonitored SMPs, echo=FALSE}
+ggplot(unmonitored_smp_type_break, aes(x="", y= count, fill=Type))+geom_bar(width = 1, stat = "identity")+coord_polar("y", start=0)
+```
+
+```{r section 6 full join the unmonitored and monitored, echo=FALSE}
+#full join the unmonitored and monirored and create a column to sum them up
+smp_breakdwon_full <- smp_type_break %>%
+  full_join(unmonitored_smp_type_break, by="Type") %>%
+  select(Type, count_monitored = count.x, count_unmonitored = count.y)
+
+#replace na with zero
+smp_breakdwon_full[is.na(smp_breakdwon_full)] <- 0
+
+#mutate the third column
+smp_breakdwon_full <- smp_breakdwon_full %>%
+  mutate(sum_all = count_monitored + count_unmonitored)
+
+#data frame for plotting (only two columns)
+pivot_df <- smp_breakdwon_full %>%
+  select(Type, count_monitored, sum_all)
+
+df_longer <- pivot_longer(pivot_df, cols = c("count_monitored", "sum_all"), names_to = "category", values_to = "count")
+
+#Plot
+ggplot(df_longer,aes(x = Type, y = count, fill= category)) +
+      geom_bar(stat="identity", position=position_dodge())+
+      theme(axis.text=element_text(size=6, angle = 35),
+        axis.title=element_text(size=10))
+
+```
+
+```{r section 7, adding the monitored and unmoniored}
+#combining all smps (monitored and unmonitored) and get fractions based on type of smp-finally normalize them
+total_smp <- unmonitored_smp_type_break %>%
+  full_join(smp_type_break, by="Type")
+total_smp[is.na(total_smp)] <- 0
+total_smp <- total_smp %>%
+  mutate(total_number = count.x+count.y) %>%
+  select(Type, total_number)
+total_smp <- total_smp %>%
+    mutate(sum_all = sum(total_number)) %>%
+    mutate(percent_all = (total_number/sum_all)*100)
+
+#get the percent of monitored SMP
+smp_type_break_fraction <- smp_type_break %>%
+    mutate(sum_all = sum(count)) %>%
+    mutate(percent_monitored = (count/sum_all)*100)
+
+#normalize the monitored smp by the total smp percents
+normalized_fractions <- smp_type_break_fraction %>%
+  full_join(total_smp, by="Type") %>%
+  mutate(normalized_percent = percent_monitored/percent_all) %>%
+  select(Type, percent_monitored, percent_all, normalized_percent)
+
+normalized_fractions[is.na(normalized_fractions)] <- 0
+```
+
+The following table is aimed to identify the over-representing (normalized percent \> 1) and under-representing (normalized percent \<1) SMP types.
+
+```{r}
+#calculating the normalized percentage of smp types
+kable(arrange(normalized_fractions, normalized_percent), caption = "Normalized SMP Break-down")
+```
+
+The table above shows Tree trenches are over-represented in our CWL data, while green roof, stormwater tree, bumpout, swale and planters are under-represented (due to monitoring limitation, etc).
+
+The following section is focused on establishing the design metrics range for SMPs in the unmonitored SMP list. These design metrics include drainage area, storm size managed and loading ratio.
+
+```{r section 8, rawstormsizemanaged-in , sys_impervda_ft2, and loading ratio metrics gathering}
+#rawstormsizemanaged-in , sys_impervda_ft2, and loading ratio metrics gathering
+
+table_all <- unmonitored_smp_features %>%
+  left_join(sysbdv, by="system_id") %>%
+  mutate(loading_ratio = sys_lrtotalda_ft2 )
+```
+
+```{r section 9}
+#Clustring analysis based on 3 features of drainage area, loading ratio, and storm sized managed
+
+clustered_moniored <- table_all %>%
+  select(system_id, sys_impervda_ft2, loading_ratio, sys_rawstormsizemanaged_in) %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_moniored
+normalized_cluster[,2:4] <- scale(clustered_moniored[,2:4])
+
+#Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
+#number of clusters
+fviz_nbclust(normalized_cluster[,2:4], kmeans, method = "wss")
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,2:4], centers = 4)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_moniored$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_moniored$cluster)
+```
+
+```{r section 10 analyzing the cluster features}
+# Group by the cluster assignment and calculate averages
+sys_clus_avg <- clustered_moniored %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+kable(sys_clus_avg)
+```
+
+```{r 2D Plot}
+ggplot(data = clustered_moniored, aes(x = loading_ratio, y = sys_rawstormsizemanaged_in, color = cluster)) +
+    geom_point()
+```
+
+```{r 3D plot}
+plot_ly(clustered_moniored, x = ~sys_impervda_ft2, y = ~loading_ratio, z = ~sys_rawstormsizemanaged_in) %>%
+  add_markers(color = ~cluster)
+```
+
+In order to have a more relevant clustering method that distinguishes between general types of systems (lined vs unlined or bioretention vs bio infiltration), the unmonitored SMPs were devided into broad categories of Bioinfiltration, Bioretention (lined), Bioretention (unlined), Subsurface infiltration, Subsurface slow release (lined), and Subsurface slow release (unlined). This is done by a system-level feature called sys_modelinputcategory. The code chunk below shows a break down of these SMPs. Please note that green roof and permeable pavements are not included due to the low number.
+
+```{r section 11 sys_modelinputcategory is used to categorize systems}
+#sys_modelinputcategory categories
+sys_cat <- table_all %>%
+  select(system_id, sys_modelinputcategory)%>%
+  distinct %>%
+  group_by(sys_modelinputcategory) %>%
+  summarise(count = n())
+
+kable(sys_cat)
+```
+
+```{r section 12 clustering Bioinfiltration type systems }
+
+clustered_Bioinfiltration <- table_all %>%
+  filter(sys_modelinputcategory == "Bioinfiltration") %>%
+  select(system_id, sys_impervda_ft2, loading_ratio, sys_rawstormsizemanaged_in, sys_modelinputcategory) %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_Bioinfiltration
+normalized_cluster[,2:4] <- scale(clustered_Bioinfiltration[,2:4])
+
+#Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
+#number of clusters
+fviz_nbclust(normalized_cluster[,2:4], kmeans, method = "wss")
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,2:4], centers = 4)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_Bioinfiltration$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_Bioinfiltration$cluster)
+
+# Group by the cluster assignment and calculate averages
+sys_clus_avg <- clustered_Bioinfiltration %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+kable(sys_clus_avg)
+
+#3 D plot
+plot_ly(clustered_Bioinfiltration, x = ~sys_impervda_ft2, y = ~loading_ratio, z = ~sys_rawstormsizemanaged_in) %>%
+  add_markers(color = ~cluster)
+```
+
+Bioretention (lined) clustering. Note that loading ratio field is not applicable here.
+
+```{r section 13 Bioretention lined clustering}
+
+clustered_Bioreten_lined <- table_all %>%
+  filter(sys_modelinputcategory == "Bioretention (lined)") %>%
+  select(system_id, sys_impervda_ft2, sys_rawstormsizemanaged_in, sys_modelinputcategory) %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_Bioreten_lined
+normalized_cluster[,2:3] <- scale(clustered_Bioreten_lined[,2:3])
+
+#Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
+#number of clusters
+fviz_nbclust(normalized_cluster[,2:3], kmeans, method = "wss")
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,2:3], centers = 2)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_Bioreten_lined$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_Bioreten_lined$cluster)
+
+# Group by the cluster assignment and calculate averages
+sys_clus_avg <- clustered_Bioreten_lined %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+kable(sys_clus_avg)
+
+#3 D plot
+plot_ly(clustered_Bioreten_lined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in) %>%
+  add_markers(color = ~cluster)
+```
+
+Bioretention (unlined) clustering.
+
+```{r section 14 Bioretention unlined clustering}
+
+clustered_Bioreten_unlined <- table_all %>%
+  filter(sys_modelinputcategory == "Bioretention (unlined)") %>%
+  select(system_id, sys_impervda_ft2, sys_rawstormsizemanaged_in, loading_ratio, sys_modelinputcategory) %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_Bioreten_unlined
+normalized_cluster[,2:4] <- scale(clustered_Bioreten_unlined[,2:4])
+
+#Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
+#number of clusters
+fviz_nbclust(normalized_cluster[,2:4], kmeans, method = "wss")
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,2:4], centers = 3)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_Bioreten_unlined$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_Bioreten_unlined$cluster)
+
+# Group by the cluster assignment and calculate averages
+sys_clus_avg <- clustered_Bioreten_unlined %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+kable(sys_clus_avg)
+
+#3 D plot
+plot_ly(clustered_Bioreten_unlined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in, z= ~loading_ratio) %>%
+  add_markers(color = ~cluster)
+```
+
+```{r section 15 Subsurface infiltration clustering}
+
+clustered_subsurface <- table_all %>%
+  filter(sys_modelinputcategory == "Subsurface infiltration") %>%
+  select(system_id, sys_impervda_ft2, sys_rawstormsizemanaged_in, loading_ratio, sys_modelinputcategory) %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_subsurface
+normalized_cluster[,2:4] <- scale(clustered_subsurface[,2:4])
+
+#Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
+#number of clusters
+fviz_nbclust(normalized_cluster[,2:4], kmeans, method = "wss")
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,2:4], centers = 2)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_subsurface$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_subsurface$cluster)
+
+# Group by the cluster assignment and calculate averages
+sys_clus_avg <- clustered_subsurface %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+kable(sys_clus_avg)
+
+#3 D plot
+plot_ly(clustered_subsurface, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in, z= ~loading_ratio) %>%
+  add_markers(color = ~cluster)
+```
+
+```{r section 16 Subsurface slow release (lined)	 clustering}
+
+clustered_slowrel_lined <- table_all %>%
+  filter(sys_modelinputcategory == "Subsurface slow release (lined)") %>%
+  select(system_id, sys_impervda_ft2, sys_rawstormsizemanaged_in, sys_modelinputcategory) %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_slowrel_lined
+normalized_cluster[,2:3] <- scale(clustered_slowrel_lined[,2:3])
+
+#Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
+#number of clusters
+fviz_nbclust(normalized_cluster[,2:3], kmeans, method = "wss")
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,2:3], centers = 2)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_slowrel_lined$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_slowrel_lined$cluster)
+
+# Group by the cluster assignment and calculate averages
+sys_clus_avg <- clustered_slowrel_lined %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+kable(sys_clus_avg)
+
+#3 D plot
+plot_ly(clustered_slowrel_lined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in) %>%
+  add_markers(color = ~cluster)
+
+
+```
+
+```{r section 17 Subsurface slow release (unlined)	}
+
+clustered_slowrel_unlined <- table_all %>%
+  filter(sys_modelinputcategory == "Subsurface slow release (unlined)") %>%
+  select(system_id, sys_impervda_ft2, sys_rawstormsizemanaged_in, loading_ratio, sys_modelinputcategory) %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_slowrel_unlined
+normalized_cluster[,2:3] <- scale(clustered_slowrel_unlined[,2:3])
+
+#Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
+#number of clusters
+fviz_nbclust(normalized_cluster[,2:3], kmeans, method = "wss")
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,2:3], centers = 2)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_slowrel_unlined$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_slowrel_unlined$cluster)
+
+# Group by the cluster assignment and calculate averages
+sys_clus_avg <- clustered_slowrel_unlined %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+kable(sys_clus_avg)
+
+#3 D plot
+plot_ly(clustered_slowrel_unlined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in, z = ~loading_ratio) %>%
+  add_markers(color = ~cluster)
+```
+
+Upon clustering the systems, the data will be collected in a unified data frame for stratified sampling. The stratified sampling creates a balanced list of systems that are reflective of the size of each smp type and that of the internal clusters. For example, the code below has generated 58 system (\~ 10% of total unmonitored systems); the size of each system type is proportional to that of the population, and within each type of systems, a proportional number of systems has been chosen from each cluster e.g., in Bioinfiltration type systems, 7 systems are randomly chosen from cluster 3, 3 systems from cluster 2, and 2 systems from cluster 1.
+
+```{r section 18 sampling}
+#binding all sub-type groups into one table
+sys_clustered_all <- bind_rows(clustered_Bioinfiltration[,c("system_id","cluster","sys_modelinputcategory")], clustered_Bioreten_lined[,c("system_id","cluster","sys_modelinputcategory")], clustered_Bioreten_unlined[,c("system_id","cluster","sys_modelinputcategory")], clustered_slowrel_lined[,c("system_id","cluster","sys_modelinputcategory")], clustered_slowrel_unlined[,c("system_id","cluster","sys_modelinputcategory")], clustered_subsurface[,c("system_id","cluster","sys_modelinputcategory")])
+
+#sampling code
+stratified_sample <- sys_clustered_all %>%
+    group_by(sys_modelinputcategory, cluster) %>%
+    sample_frac(size=0.1)
+
+kable(stratified_sample)
+```
