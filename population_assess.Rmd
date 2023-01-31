@@ -1,10 +1,8 @@
 ---
 title: "SMP population assesment"
 output: html_notebook
-author: "Farshad Ebrahimi, Jan/11/2023"
+author: "Farshad Ebrahimi, Jan/24/2023"
 ---
-
-**Motivation**
 
 The goal of this analysis is to assess the SMP population with CWL monitoring data, categorize them and find the underrepresented smp features in our data set. This is to ensure our monitoring effort results in a more comprehensive data set that covers all types of SMPs with varying design metrics such as loading ratios. The output of this analysis can assist the data collection team with their future site selection process.
 
@@ -22,6 +20,7 @@ The goal of this analysis is to assess the SMP population with CWL monitoring da
       library(dplyr)
       library(ggplot2)
       library(knitr)
+      library(plotly)
 # DB PG14
     con <- dbConnect(odbc::odbc(), dsn = "mars14_data", uid = Sys.getenv("shiny_uid"), pwd = Sys.getenv("shiny_pwd"), MaxLongVarcharSize = 8190)
 
@@ -56,11 +55,11 @@ smp_type_break <- smp_features %>%
   select(Type = smp_smptype, count)
 ```
 
-```{r, echo=False}
+```{r section 3, echo=False}
 ggplot(smp_type_break, aes(x="", y= count, fill=Type))+geom_bar(width = 1, stat = "identity")+coord_polar("y", start=0)
 ```
 
-```{r section 3, looking at the unmonitored SMPs to see the break-down}
+```{r section 4, looking at the unmonitored SMPs to see the break-down}
 #number of unmonitored smps
 unmonitored_smp_type_break <- unmonitored_smp_features %>% 
   group_by(smp_smptype) %>%
@@ -70,11 +69,38 @@ unmonitored_smp_type_break <- unmonitored_smp_features %>%
 
 The following Pie chart shows the break-down of all SMPs (monitored and unmonitored).
 
-```{r, echo=FALSE}
+```{r setion 5, echo=FALSE}
 ggplot(unmonitored_smp_type_break, aes(x="", y= count, fill=Type))+geom_bar(width = 1, stat = "identity")+coord_polar("y", start=0)
 ```
 
-```{r section 4, adding the monitored and unmoniored}
+```{r section 6, echo=FALSE}
+#full join the unmonitored and monirored and create a column to sum them up
+smp_breakdwon_full <- smp_type_break %>%
+  full_join(unmonitored_smp_type_break, by="Type") %>%
+  select(Type, count_monitored = count.x, count_unmonitored = count.y)
+
+#replace na with zero
+smp_breakdwon_full[is.na(smp_breakdwon_full)] <- 0
+
+#mutate the third column
+smp_breakdwon_full <- smp_breakdwon_full %>%
+  mutate(sum_all = count_monitored + count_unmonitored)
+
+#data frame for plotting (only two columns)
+pivot_df <- smp_breakdwon_full %>%
+  select(Type, count_monitored, sum_all)
+
+df_longer <- pivot_longer(pivot_df, cols = c("count_monitored", "sum_all"), names_to = "category", values_to = "count")
+
+#Plot
+ggplot(df_longer,aes(x = Type, y = count, fill= category)) +
+      geom_bar(stat="identity", position=position_dodge())+
+      theme(axis.text=element_text(size=6, angle = 35),
+        axis.title=element_text(size=10))
+
+```
+
+```{r section 7, adding the monitored and unmoniored}
 #combining all smps (monitored and unmonitored) and get fractions based on type of smp-finally normalize them
 total_smp <- unmonitored_smp_type_break %>%
   full_join(smp_type_break, by="Type")
@@ -102,17 +128,16 @@ normalized_fractions[is.na(normalized_fractions)] <- 0
 
 The following table is aimed to identify the over-representing (normalized percent \> 1) and under-representing (normalized percent \<1) SMP types.
 
-```{r normalized percentage }
+```{r}
 #calculating the normalized percentage of smp types
 kable(arrange(normalized_fractions, normalized_percent), caption = "Normalized SMP Break-down")
-
 ```
 
 The table above shows Tree trenches are over-represented in our CWL data, while green roof, stormwater tree, bumpout, swale and planters are under-represented (due to monitoring limitation, etc).
 
 The following section is focused on establishing the design metrics range for SMPs in the unmonitored SMP list. These design metrics include drainage area, storm size managed and loading ratio.
 
-```{r section 5, establish range for design metrics}
+```{r section 9, establish range for design metrics}
 #filtering SMPs to the two most common ones: tree trench, and  infiltration/storage trench SMPs
 loading_ratio <- greenit_unified %>%
   mutate(loading_ratio = dcia_ft2/storage_footprint_ft2) %>%
@@ -127,7 +152,7 @@ table_all <- unmonitored_smp_all %>%
   left_join(sysbdv, by="system_id") 
 ```
 
-```{r section 6, stats }
+```{r section 10, stats }
 #Draiange at system level
 drainage_area <- table_all %>%
   select(smp_smptype, sys_impervda_ft2) %>%
@@ -149,15 +174,104 @@ kable(storm_managed)
 #loading ratio
 lr_capacity <- table_all %>%
   select(smp_smptype, loading_ratio) %>%
-  distinct() %>%
   na.omit() %>%
   group_by(smp_smptype) %>%
   summarise(number= n(), average_lr= mean(loading_ratio), median= median(loading_ratio), min= min(loading_ratio), max= max(loading_ratio))
 kable(lr_capacity)
 ```
 
-```{r section 7}
+```{r section 11}
 kable(drainage_area, caption = "Draiange Area (ft2) Range-Unmoniotred SMPs")
 kable(lr_capacity, caption = "Loading Ratio Range-Unmoniotred SMPs")
 kable(storm_managed, caption = "Storm Size Managed (in) Range-Unmoniotred SMPs")
+```
+
+```{r section 12}
+#creating the design metrics tables for monitored smps
+#Draiange at system level
+
+#add the loading ratio to unmonitored_smp_features
+monitored_smp_all <- smp_features %>%
+  left_join(loading_ratio, by="smp_id")
+
+#calcluate stats for  smp footprint, storage depth, and vegetated area, sys-rawstormsizemanaged-in , sys_impervda_ft2, and loading ratio
+table_all_monitored <- monitored_smp_all %>%
+  left_join(sysbdv, by="system_id") 
+  
+  
+drainage_area_monitored <- table_all_monitored %>%
+  select(smp_smptype, sys_impervda_ft2) %>%
+  distinct() %>%
+  na.omit() %>%
+  group_by(smp_smptype) %>%
+  summarise(number= n(), average_drainage= mean(sys_impervda_ft2), median= median(sys_impervda_ft2), min= min(sys_impervda_ft2), max= max(sys_impervda_ft2))
+kable(drainage_area)
+
+#Storm-size managed at system level
+storm_managed_monitored <- table_all_monitored %>%
+  select(smp_smptype, sys_rawstormsizemanaged_in) %>%
+  distinct() %>%
+  na.omit() %>%
+  group_by(smp_smptype) %>%
+  summarise(number= n(), average_storm= mean(sys_rawstormsizemanaged_in), median= median(sys_rawstormsizemanaged_in), min= min(sys_rawstormsizemanaged_in), max= max(sys_rawstormsizemanaged_in))
+kable(storm_managed)
+
+#loading ratio
+lr_capacity_monitored <- table_all_monitored %>%
+  select(smp_smptype, loading_ratio) %>%
+  na.omit() %>%
+  group_by(smp_smptype) %>%
+  summarise(number= n(), average_lr= mean(loading_ratio), median= median(loading_ratio), min= min(loading_ratio), max= max(loading_ratio))
+kable(lr_capacity)
+
+```
+
+```{r section 13}
+kable(drainage_area_monitored, caption = "Draiange Area (ft2) Range-moniotred SMPs")
+kable(lr_capacity_monitored, caption = "Loading Ratio Range-moniotred SMPs")
+kable(storm_managed_monitored, caption = "Storm Size Managed (in) Range-moniotred SMPs")
+```
+
+```{r section 14}
+#Clustring analysis of monitored tree trenches based on 3 features of drainage area, loading ratio, and storm sized managed
+
+clustered_moniored <- table_all_monitored %>%
+  select(smp_id,smp_smptype, sys_impervda_ft2, loading_ratio, sys_rawstormsizemanaged_in) %>%
+  filter(smp_smptype == "Tree Trench") %>%
+  na.omit() %>%
+  distinct()
+
+#normalze using mean-sd standardization
+normalized_cluster <- clustered_moniored
+normalized_cluster[,3:5] <- scale(clustered_moniored[,3:5])
+
+#k-means 
+# Cluster using kmeans with five clusters
+cluster_solution <- kmeans(normalized_cluster[,3:5], centers = 4)
+
+# Store the cluster assignments back into the clustering data frame object
+clustered_moniored$cluster <-factor(cluster_solution$cluster) 
+
+# Look at the distribution of cluster assignments
+table(clustered_moniored$cluster)
+```
+
+```{r analyzing the cluster features}
+# Group by the cluster assignment and calculate averages
+smp_clus_avg <- clustered_moniored %>%
+    group_by(cluster) %>%
+    summarize_if(is.numeric, mean)
+
+# View the resulting table
+smp_clus_avg
+```
+
+```{r 2D Plot}
+ggplot(data = clustered_moniored, aes(x = sys_impervda_ft2, y = loading_ratio, color = cluster)) +
+    geom_point()
+```
+
+```{r 3D plot}
+plot_ly(clustered_moniored, x = ~sys_impervda_ft2, y = ~loading_ratio, z = ~sys_rawstormsizemanaged_in) %>%
+  add_markers(color = ~cluster)
 ```
