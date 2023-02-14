@@ -1,10 +1,16 @@
 ---
-title: "SMP population assesment"
+title: "SMP Population Assesment"
 output: html_notebook
-author: "Farshad Ebrahimi, Jan/30/2023"
+author: "Farshad Ebrahimi, Feb/7/2023"
 ---
 
-The goal of this analysis is to assess the SMP population with CWL monitoring data, categorize them and find the underrepresented smp features in our data set. This is to ensure our monitoring effort results in a more comprehensive data set that covers all types of SMPs with varying design metrics such as loading ratios. The output of this analysis can assist the data collection team with their future site selection process.
+**Developing a Stratified Sampling Scheme for the Unmonitored Systems Using K-means Clustering Method**
+
+**Background**
+
+The aim of this analysis is to analyze SMP population using CWL monitoring data, categorize it, and identify underrepresented SMP features in our data set. We will also use clustering to group systems with similar characteristics and develop a stratified sampling script to randomly select a representative sample of systems proportional to their cluster and system type. This will ensure a comprehensive data set covering all types of SMPs with varying design metrics such as loading ratios, drainage area, and storm size management. The output of this analysis will help the data collection team with their future site selection.
+
+1.  **Finding the over-represented/under-represented SMPs**
 
 ```{r section 1, Loading libraries and querying smp data }
 #Libraries
@@ -47,7 +53,7 @@ The goal of this analysis is to assess the SMP population with CWL monitoring da
       inner_join(smpbdv, by="smp_id")
 ```
 
-The following code chunk calculates the break-down of SMP types with CWL data.
+The code calculates the distribution of SMP types with CWL data in the MARS database, providing an initial understanding of the distribution of SMP subtypes.
 
 ```{r section 2, Monitored SMP break-down based on type}
 #number of smp types
@@ -69,11 +75,13 @@ unmonitored_smp_type_break <- unmonitored_smp_features %>%
   select(Type = smp_smptype, count)
 ```
 
-The following Pie chart shows the break-down of all SMPs (monitored and unmonitored).
+Similar analysis is performed below to calculate the distribution of SMP types in the entire population of SMP including the monitored and unmonitored SMPs.
 
 ```{r setion 5 pie chart of unmonitored SMPs, echo=FALSE}
 ggplot(unmonitored_smp_type_break, aes(x="", y= count, fill=Type))+geom_bar(width = 1, stat = "identity")+coord_polar("y", start=0)
 ```
+
+The analysis aims to determine the over-represented (normalized percent \> 1) and under-represented (normalized percent \< 1) SMP types by dividing the fraction of a specific SMP type in the monitored data by the fraction in the entire population.
 
 ```{r section 6 full join the unmonitored and monitored, echo=FALSE}
 #full join the unmonitored and monirored and create a column to sum them up
@@ -128,16 +136,18 @@ normalized_fractions <- smp_type_break_fraction %>%
 normalized_fractions[is.na(normalized_fractions)] <- 0
 ```
 
-The following table is aimed to identify the over-representing (normalized percent \> 1) and under-representing (normalized percent \<1) SMP types.
-
 ```{r}
 #calculating the normalized percentage of smp types
 kable(arrange(normalized_fractions, normalized_percent), caption = "Normalized SMP Break-down")
 ```
 
-The table above shows Tree trenches are over-represented in our CWL data, while green roof, stormwater tree, bumpout, swale and planters are under-represented (due to monitoring limitation, etc).
+The table above shows Tree trenches are over-represented in our CWL data, while bumpout, swale and planters are under-represented (due to monitoring limitation, etc). However, it should be noted that MARS does not plan on monitoring greef roofs due to limitations on access to these systems and a 1:1 loading ratios. Stromwater trees, smilarly, does not have any CWL data and the monitoring efforts are limited to CET tests only. Porous pavements are also limited to infiltration rate testing and have no CWL data.
 
-The following section is focused on establishing the design metrics range for SMPs in the unmonitored SMP list. These design metrics include drainage area, storm size managed and loading ratio.
+2.  **Clustering at the system-level**
+
+The current section aims to categorize the systems within each broad subtypes. The reason to perform this at the system level is the accessibility of design metrics at the system level. The clustering within each type of systems is done to ensure the sampling approach picks an appropriate number of systems from systems possessing similar characteristics within these types. For example, the sampling method should select a larger number of Bioinfiltration systems with higher drainage area if those systems constitute the majority of Bioinfiltration systems.
+
+The binning approach considers several system features like loading ratios, drainage area, and storm size management. The code chunks below demonstrate a clustering method applied to unmonitored systems, regardless of subtypes, as an example of how it can group systems based solely on these three design metrics. The clustering will then be repeated within each subtype to provide a more relevant method for sampling.
 
 ```{r section 8, rawstormsizemanaged-in , sys_impervda_ft2, and loading ratio metrics gathering}
 #rawstormsizemanaged-in , sys_impervda_ft2, and loading ratio metrics gathering
@@ -146,6 +156,10 @@ table_all <- unmonitored_smp_features %>%
   left_join(sysbdv, by="system_id") %>%
   mutate(loading_ratio = sys_lrtotalda_ft2 )
 ```
+
+K-means clustering is an unsupervised learning method that groups data points based on their proximity to centroids, which are calculated as the mean of all points in a cluster. The algorithm starts by randomly selecting initial centroids, and then repeatedly adjusts them until convergence is achieved
+
+The optimal number of clusters is determined using the Elbow method. In summary, this method picks the number of clusters in which a the slope of the lines changes more drastically (cluster 4 in the following graph).
 
 ```{r section 9}
 #Clustring analysis based on 3 features of drainage area, loading ratio, and storm sized managed
@@ -174,6 +188,8 @@ clustered_moniored$cluster <-factor(cluster_solution$cluster)
 table(clustered_moniored$cluster)
 ```
 
+The above table displays the number of systems in each cluster. The subsequent tables aim to determine the average of system design metrics in each category. The data can be analyzed by examining each category; for instance, Cluster Four encompasses systems with a large drainage area, capable of handling larger storm sizes (\>3 inch/hr).
+
 ```{r section 10 analyzing the cluster features}
 # Group by the cluster assignment and calculate averages
 sys_clus_avg <- clustered_moniored %>%
@@ -194,7 +210,7 @@ plot_ly(clustered_moniored, x = ~sys_impervda_ft2, y = ~loading_ratio, z = ~sys_
   add_markers(color = ~cluster)
 ```
 
-In order to have a more relevant clustering method that distinguishes between general types of systems (lined vs unlined or bioretention vs bio infiltration), the unmonitored SMPs were devided into broad categories of Bioinfiltration, Bioretention (lined), Bioretention (unlined), Subsurface infiltration, Subsurface slow release (lined), and Subsurface slow release (unlined). This is done by a system-level feature called sys_modelinputcategory. The code chunk below shows a break down of these SMPs. Please note that green roof and permeable pavements are not included due to the low number.
+In order to create a more pertinent clustering method that distinguishes between general types of systems (lined vs. unlined or bioretention vs. bioinfiltration), the unmonitored systems were divided into broad categories, including Bioinfiltration, Bioretention (lined), Bioretention (unlined), Subsurface Infiltration, Subsurface Slow Release (lined), and Subsurface Slow Release (unlined) using the system-level feature called sys_modelinputcategory. The code chunk below displays a breakdown of these SMPs. The clustering algorithm was repeated for each of those groups similarly. Please note that Green Roofs and Permeable Pavements were not included due to a low number of systems.
 
 ```{r section 11 sys_modelinputcategory is used to categorize systems}
 #sys_modelinputcategory categories
@@ -206,6 +222,8 @@ sys_cat <- table_all %>%
 
 kable(sys_cat)
 ```
+
+**-Bioinfiltration Clustering:**
 
 ```{r section 12 clustering Bioinfiltration type systems }
 
@@ -246,7 +264,7 @@ plot_ly(clustered_Bioinfiltration, x = ~sys_impervda_ft2, y = ~loading_ratio, z 
   add_markers(color = ~cluster)
 ```
 
-Bioretention (lined) clustering. Note that loading ratio field is not applicable here.
+**-Bioretention (lined) clustering. Note that loading ratio field is not applicable here:**
 
 ```{r section 13 Bioretention lined clustering}
 
@@ -287,7 +305,7 @@ plot_ly(clustered_Bioreten_lined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizema
   add_markers(color = ~cluster)
 ```
 
-Bioretention (unlined) clustering.
+**-Bioretention (unlined) clustering:**
 
 ```{r section 14 Bioretention unlined clustering}
 
@@ -328,6 +346,8 @@ plot_ly(clustered_Bioreten_unlined, x = ~sys_impervda_ft2, y = ~sys_rawstormsize
   add_markers(color = ~cluster)
 ```
 
+**-Subsurface infiltration clustering:**
+
 ```{r section 15 Subsurface infiltration clustering}
 
 clustered_subsurface <- table_all %>%
@@ -366,6 +386,8 @@ kable(sys_clus_avg)
 plot_ly(clustered_subsurface, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in, z= ~loading_ratio) %>%
   add_markers(color = ~cluster)
 ```
+
+**-Subsurface slow release (lined) clustering:**
 
 ```{r section 16 Subsurface slow release (lined)	 clustering}
 
@@ -408,6 +430,8 @@ plot_ly(clustered_slowrel_lined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizeman
 
 ```
 
+**-Subsurface slow release (unlined) clustering:**
+
 ```{r section 17 Subsurface slow release (unlined)	}
 
 clustered_slowrel_unlined <- table_all %>%
@@ -447,7 +471,7 @@ plot_ly(clustered_slowrel_unlined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizem
   add_markers(color = ~cluster)
 ```
 
-Upon clustering the systems, the data will be collected in a unified data frame for stratified sampling. The stratified sampling creates a balanced list of systems that are reflective of the size of each smp type and that of the internal clusters. For example, the code below has generated 58 system (\~ 10% of total unmonitored systems); the size of each system type is proportional to that of the population, and within each type of systems, a proportional number of systems has been chosen from each cluster e.g., in Bioinfiltration type systems, 7 systems are randomly chosen from cluster 3, 3 systems from cluster 2, and 2 systems from cluster 1.
+Upon clustering the systems, the data will be collected in a unified data frame for stratified sampling. The stratified sampling creates a balanced list of systems that are reflective of the size of each system type and that of the internal clusters. For example, the code below has generated 58 system (\~ 10% of total unmonitored systems); the size of each system type is proportional to that of the population, and within each type of systems, a proportional number of systems has been chosen from each cluster e.g., in Bioinfiltration type systems, 7 systems are randomly chosen from cluster 3, 3 systems from cluster 2, and 2 systems from cluster 1.
 
 ```{r section 18 sampling}
 #binding all sub-type groups into one table
@@ -460,3 +484,5 @@ stratified_sample <- sys_clustered_all %>%
 
 kable(stratified_sample)
 ```
+
+To generate monitoring systems, we developed a semi-random approach that utilizes a binning technique. This approach involves assigning systems to clusters based on their specific type, with the binning process utilizing a combination of design metrics to group similar systems together. To ensure a representative sample of systems, the random selection process chooses a proportional number of systems from each cluster and system type based on their size.
