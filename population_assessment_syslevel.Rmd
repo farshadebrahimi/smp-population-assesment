@@ -1,7 +1,7 @@
 ---
 title: "SMP Population Assesment"
-output: html_notebook
 author: "Farshad Ebrahimi, Feb/7/2023"
+output: html_notebook
 ---
 
 **Developing a Stratified Sampling Scheme for the Unmonitored Systems Using K-means Clustering Method**
@@ -45,7 +45,7 @@ The aim of this analysis is to analyze SMP population using CWL monitoring data,
     smp_features <- cwl_smp %>% 
       inner_join(smpbdv, by="smp_id")
 # Unmonitored SMPs
-    unmonitored_smp <- read.csv("C:\\Users\\Farshad.Ebrahimi\\OneDrive - City of Philadelphia\\Github Projects\\smp-population-assesment\\unmonitored_sites.csv") %>%
+    unmonitored_smp <- read.csv("\\\\pwdoows\\oows\\Watershed Sciences\\GSI Monitoring\\06 Special Projects\\51 SMP Population Assessment Analysis\\unmonitored_sites.csv") %>%
       select(smp_id = SMP.ID) %>%
       distinct()
 # unmonitored smp_features
@@ -63,7 +63,7 @@ smp_type_break <- smp_features %>%
   select(Type = smp_smptype, count)
 ```
 
-```{r section 3 pie chart of monitored SMPs, echo=False}
+```{r section 3 pie chart of monitored SMPs, echo=FALSE}
 ggplot(smp_type_break, aes(x="", y= count, fill=Type))+geom_bar(width = 1, stat = "identity")+coord_polar("y", start=0)
 ```
 
@@ -110,7 +110,7 @@ ggplot(df_longer,aes(x = Type, y = count, fill= category)) +
 
 ```
 
-```{r section 7, adding the monitored and unmoniored}
+```{r section 7, adding the monitored and unmonitored}
 #combining all smps (monitored and unmonitored) and get fractions based on type of smp-finally normalize them
 total_smp <- unmonitored_smp_type_break %>%
   full_join(smp_type_break, by="Type")
@@ -138,7 +138,7 @@ normalized_fractions[is.na(normalized_fractions)] <- 0
 
 ```{r}
 #calculating the normalized percentage of smp types
-kable(arrange(normalized_fractions, normalized_percent), caption = "Normalized SMP Break-down")
+kable(arrange(normalized_fractions, normalized_percent), caption = "Normalized SMP Break-down", digits = 3)
 ```
 
 The table above shows Tree trenches are over-represented in our CWL data, while bumpout, swale and planters are under-represented (due to monitoring limitation, etc). However, it should be noted that MARS does not plan on monitoring greef roofs due to limitations on access to these systems and a 1:1 loading ratios. Stromwater trees, smilarly, does not have any CWL data and the monitoring efforts are limited to CET tests only. Porous pavements are also limited to infiltration rate testing and have no CWL data.
@@ -162,16 +162,16 @@ K-means clustering is an unsupervised learning method that groups data points ba
 The optimal number of clusters is determined using the Elbow method. In summary, this method picks the number of clusters in which a the slope of the lines changes more drastically (cluster 4 in the following graph).
 
 ```{r section 9}
-#Clustring analysis based on 3 features of drainage area, loading ratio, and storm sized managed
+#Clustering analysis based on 3 features of drainage area, loading ratio, and storm sized managed
 
-clustered_moniored <- table_all %>%
+clustered_monitored <- table_all %>%
   select(system_id, sys_impervda_ft2, loading_ratio, sys_rawstormsizemanaged_in) %>%
   na.omit() %>%
   distinct()
 
 #normalze using mean-sd standardization
-normalized_cluster <- clustered_moniored
-normalized_cluster[,2:4] <- scale(clustered_moniored[,2:4])
+normalized_cluster <- clustered_monitored
+normalized_cluster[,2:4] <- scale(clustered_monitored[,2:4])
 
 #Elbow method shows a subtle elbow at cluster 4-hence 4 clusters is optimum
 #number of clusters
@@ -182,31 +182,31 @@ fviz_nbclust(normalized_cluster[,2:4], kmeans, method = "wss")
 cluster_solution <- kmeans(normalized_cluster[,2:4], centers = 4)
 
 # Store the cluster assignments back into the clustering data frame object
-clustered_moniored$cluster <-factor(cluster_solution$cluster) 
+clustered_monitored$cluster <-factor(cluster_solution$cluster) 
 
 # Look at the distribution of cluster assignments
-table(clustered_moniored$cluster)
+table(clustered_monitored$cluster)
 ```
 
 The above table displays the number of systems in each cluster. The subsequent tables aim to determine the average of system design metrics in each category. The data can be analyzed by examining each category; for instance, Cluster Four encompasses systems with a large drainage area, capable of handling larger storm sizes (\>3 inch/hr).
 
 ```{r section 10 analyzing the cluster features}
 # Group by the cluster assignment and calculate averages
-sys_clus_avg <- clustered_moniored %>%
+sys_clus_avg <- clustered_monitored %>%
     group_by(cluster) %>%
     summarize_if(is.numeric, mean)
 
 # View the resulting table
-kable(sys_clus_avg)
+kable(sys_clus_avg, digits = 3)
 ```
 
 ```{r 2D Plot}
-ggplot(data = clustered_moniored, aes(x = loading_ratio, y = sys_rawstormsizemanaged_in, color = cluster)) +
+ggplot(data = clustered_monitored, aes(x = loading_ratio, y = sys_rawstormsizemanaged_in, color = cluster)) +
     geom_point()
 ```
 
 ```{r 3D plot}
-plot_ly(clustered_moniored, x = ~sys_impervda_ft2, y = ~loading_ratio, z = ~sys_rawstormsizemanaged_in) %>%
+plot_ly(clustered_monitored, x = ~sys_impervda_ft2, y = ~loading_ratio, z = ~sys_rawstormsizemanaged_in) %>%
   add_markers(color = ~cluster)
 ```
 
@@ -257,7 +257,7 @@ sys_clus_avg <- clustered_Bioinfiltration %>%
     summarize_if(is.numeric, mean)
 
 # View the resulting table
-kable(sys_clus_avg)
+kable(sys_clus_avg, digits = 3)
 
 #3 D plot
 plot_ly(clustered_Bioinfiltration, x = ~sys_impervda_ft2, y = ~loading_ratio, z = ~sys_rawstormsizemanaged_in) %>%
@@ -298,7 +298,7 @@ sys_clus_avg <- clustered_Bioreten_lined %>%
     summarize_if(is.numeric, mean)
 
 # View the resulting table
-kable(sys_clus_avg)
+kable(sys_clus_avg, digits = 3)
 
 #3 D plot
 plot_ly(clustered_Bioreten_lined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in) %>%
@@ -339,7 +339,7 @@ sys_clus_avg <- clustered_Bioreten_unlined %>%
     summarize_if(is.numeric, mean)
 
 # View the resulting table
-kable(sys_clus_avg)
+kable(sys_clus_avg, digits = 3)
 
 #3 D plot
 plot_ly(clustered_Bioreten_unlined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in, z= ~loading_ratio) %>%
@@ -380,7 +380,7 @@ sys_clus_avg <- clustered_subsurface %>%
     summarize_if(is.numeric, mean)
 
 # View the resulting table
-kable(sys_clus_avg)
+kable(sys_clus_avg, digits = 3)
 
 #3 D plot
 plot_ly(clustered_subsurface, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in, z= ~loading_ratio) %>%
@@ -389,7 +389,7 @@ plot_ly(clustered_subsurface, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanage
 
 **-Subsurface slow release (lined) clustering:**
 
-```{r section 16 Subsurface slow release (lined)	 clustering}
+```{r section 16 Subsurface slow release (lined) clustering}
 
 clustered_slowrel_lined <- table_all %>%
   filter(sys_modelinputcategory == "Subsurface slow release (lined)") %>%
@@ -421,7 +421,7 @@ sys_clus_avg <- clustered_slowrel_lined %>%
     summarize_if(is.numeric, mean)
 
 # View the resulting table
-kable(sys_clus_avg)
+kable(sys_clus_avg, digits = 3)
 
 #3 D plot
 plot_ly(clustered_slowrel_lined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in) %>%
@@ -464,7 +464,7 @@ sys_clus_avg <- clustered_slowrel_unlined %>%
     summarize_if(is.numeric, mean)
 
 # View the resulting table
-kable(sys_clus_avg)
+kable(sys_clus_avg, digits = 3)
 
 #3 D plot
 plot_ly(clustered_slowrel_unlined, x = ~sys_impervda_ft2, y = ~sys_rawstormsizemanaged_in, z = ~loading_ratio) %>%
